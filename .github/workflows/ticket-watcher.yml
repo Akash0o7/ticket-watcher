@@ -24,13 +24,28 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
+      - name: Check login secret
+        id: check
+        env:
+          HAS_SESSION: ${{ secrets.STORAGE_STATE_B64 != '' }}
+        run: |
+          if [ "$HAS_SESSION" != "true" ]; then
+            echo "STORAGE_STATE_B64 secret is missing, so nothing will run. Add it, then start the workflow."
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/checkout@v4
+        if: steps.check.outputs.ok == 'true'
 
       - uses: actions/setup-node@v4
+        if: steps.check.outputs.ok == 'true'
         with:
           node-version: 22
 
       - name: Install browser
+        if: steps.check.outputs.ok == 'true'
         run: |
           npm install --no-audit --no-fund
           npx playwright install --with-deps chromium
@@ -38,6 +53,7 @@ jobs:
 
       - name: Watch for tickets
         id: watch
+        if: steps.check.outputs.ok == 'true'
         env:
           STORAGE_STATE_B64: ${{ secrets.STORAGE_STATE_B64 }}
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
@@ -53,12 +69,14 @@ jobs:
         run: xvfb-run -a --server-args="-screen 0 1280x900x24" node watcher.mjs
 
       - name: Stop after booking, otherwise hand over to the next run
-        if: always()
+        if: always() && steps.check.outputs.ok == 'true'
         run: |
           STATUS=$(cat run-status.txt 2>/dev/null || echo "crashed")
           echo "Run status: $STATUS"
           if [ "$STATUS" = "done" ]; then
             gh workflow disable ticket-watcher.yml --repo "$GITHUB_REPOSITORY"
-          else
+          elif [ "$STATUS" = "continue" ]; then
             gh workflow run ticket-watcher.yml --repo "$GITHUB_REPOSITORY"
+          else
+            echo "Run crashed; the 10-minute schedule will start the next one."
           fi
