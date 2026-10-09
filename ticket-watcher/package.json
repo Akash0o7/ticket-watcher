@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "login": "node login.mjs",
+    "phone-setup": "bash phone-setup.sh",
     "test-run": "DRY_RUN=1 node --env-file-if-exists=.env watcher.mjs",
     "start": "node --env-file-if-exists=.env watcher.mjs",
     "start-env": "node --env-file=.env watcher.mjs",

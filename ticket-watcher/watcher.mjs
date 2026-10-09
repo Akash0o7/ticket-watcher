@@ -226,8 +226,8 @@ async function fillBuyerDetails(page) {
   }
 }
 
-async function choosePaytm(page) {
-  const option = page.locator("label, div, li, button, [role='radio'], [role='tab']").filter({ hasText: /paytm/i });
+async function choosePaymentOption(page, pattern) {
+  const option = page.locator("label, div, li, button, [role='radio'], [role='tab']").filter({ hasText: pattern });
   const n = await option.count();
   for (let i = n - 1; i >= 0; i--) {
     const el = option.nth(i);
@@ -271,6 +271,58 @@ async function waitForPaymentApproval(page) {
   return false;
 }
 
+const QR_EXPIRED_RE = /qr (code )?(has )?expired|payment (has )?(timed out|expired|failed)|time(d)? out|session (has )?expired/;
+
+async function sendQrToPhone(page, title, message) {
+  log(`${title}: ${message}`);
+  if (!NTFY_TOPIC) return;
+  // Prefer a tight crop of the QR so it can be scanned from the phone gallery
+  let image = null;
+  const candidates = page.locator("canvas, img, svg");
+  const count = await candidates.count().catch(() => 0);
+  for (let i = 0; i < count && !image; i++) {
+    const el = candidates.nth(i);
+    const box = await el.boundingBox().catch(() => null);
+    if (box && box.width >= 120 && box.width <= 600 && Math.abs(box.width - box.height) < 20) {
+      image = await el.screenshot().catch(() => null);
+    }
+  }
+  image ??= await page.screenshot().catch(() => null);
+  if (!image) return notify(title, message, page.url(), "urgent");
+  await fetch(`https://ntfy.sh/${NTFY_TOPIC}`, {
+    method: "PUT",
+    headers: { Filename: "pay-qr.png", Title: title, Message: message, Priority: "urgent", Tags: "rotating_light", Click: page.url() },
+    body: image,
+  }).catch((e) => log(`ntfy failed: ${e.message}`));
+}
+
+// Seats are held only briefly, so the QR is re-sent every 45 seconds until it is paid or expires.
+async function waitForQrPayment(page) {
+  await sleep(3000);
+  await shot(page, "qr-page");
+  const deadline = Date.now() + APPROVAL_WAIT_MS;
+  let lastSent = 0;
+  while (Date.now() < deadline) {
+    const t = await bodyText(page);
+    if (CONFIRMED_RE.test(t)) {
+      await shot(page, "confirmed");
+      await notify("TICKETS BOOKED", `Booked ${QTY} tickets. Check your email/app.`, page.url(), "high");
+      return true;
+    }
+    if (QR_EXPIRED_RE.test(t)) return "unpaid";
+    if (Date.now() - lastSent > 45000) {
+      lastSent = Date.now();
+      await sendQrToPhone(
+        page,
+        "PAY NOW: SCAN QR",
+        `${QTY} tickets are held for you. Save this image, open your UPI app, choose Scan from gallery, and pay within a few minutes.`
+      );
+    }
+    await sleep(1000);
+  }
+  return "unpaid";
+}
+
 async function book(page, url) {
   await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45000 });
   await page.waitForLoadState("networkidle").catch(() => {});
@@ -296,15 +348,17 @@ async function book(page, url) {
       continue;
     }
 
-    if (/paytm/.test(text) && /(payment|pay using|wallet|upi|card)/.test(text)) {
-      await choosePaytm(page);
-      await shot(page, `${step}-paytm-selected`);
+    if (quantitySet && /(payment|pay using|pay with|scan)/.test(text) && /(paytm|upi|qr|scan)/.test(text)) {
+      const walletOffered = /paytm wallet/.test(text);
+      if (walletOffered) await choosePaymentOption(page, /paytm/i);
+      else await choosePaymentOption(page, /upi|qr|scan/i);
+      await shot(page, `${step}-payment-selected`);
       if (DRY_RUN) {
         await notify("DRY RUN OK", `Reached payment with ${QTY} x Rs ${pickedPrice}. Stopped before paying.`, page.url(), "default");
         return true;
       }
       await clickByText(page, /pay|proceed|continue|confirm/i);
-      return waitForPaymentApproval(page);
+      return walletOffered ? waitForPaymentApproval(page) : waitForQrPayment(page);
     }
 
     if (!quantitySet) {
@@ -379,14 +433,21 @@ while (!done) {
       attempts++;
       await notify("TICKETS LIVE", `Auto-booking attempt ${attempts}/${MAX_ATTEMPTS}`, url);
       try {
-        done = await book(page, url);
-        if (!done) {
+        const result = await book(page, url);
+        done = result === true;
+        if (result === "unpaid") {
+          await notify("NOT PAID IN TIME", `The QR expired unpaid (attempt ${attempts}/${MAX_ATTEMPTS}). Trying again.`, url, "high");
+          if (attempts >= MAX_ATTEMPTS) {
+            await notify("AUTO-BOOK FAILED", `Gave up after ${attempts} attempts. Book manually now!`, url);
+            done = true;
+          }
+        } else if (!done) {
           // Payment may have gone through without a confirmation page; retrying could double-book.
           await shot(page, "unconfirmed");
           await notifyShot(
             page,
-            "CHECK PAYTM NOW",
-            "Payment was submitted but no confirmation was seen. Check your Paytm wallet and email before booking again.",
+            "CHECK PAYMENT NOW",
+            "Payment was submitted but no confirmation was seen. Check your UPI app, bank and email before booking again.",
             "urgent"
           );
           done = true;

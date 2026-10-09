@@ -12,8 +12,7 @@ const page = context.pages()[0] ?? (await context.newPage());
 await page.goto("https://ticketgenie.in/");
 
 console.log("\nLog in to ticketgenie.in in the opened window.");
-console.log("Then open a ticket checkout once and, if it offers 'Paytm', log in to Paytm and tick any 'remember' option.");
-console.log("Your login is saved only on this computer.\n");
+console.log("Tick any 'remember me' option. Payment is by UPI QR, so no Paytm login is needed.\n");
 
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 await rl.question("Press Enter here when you are logged in...");

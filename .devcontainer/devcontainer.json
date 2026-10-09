@@ -3,10 +3,13 @@
   "image": "mcr.microsoft.com/devcontainers/javascript-node:22",
   "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
   "postCreateCommand": "bash ticket-watcher/codespaces-setup.sh",
+  "features": {
+    "ghcr.io/devcontainers/features/desktop-lite:1": { "password": "noPassword" }
+  },
   "forwardPorts": [6080],
   "portsAttributes": {
     "6080": {
-      "label": "Live browser (captcha / Paytm login)",
+      "label": "Desktop in browser (ticketgenie login)",
       "visibility": "private",
       "onAutoForward": "silent"
     }
