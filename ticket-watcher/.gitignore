@@ -2,3 +2,6 @@
 profile/
 node_modules/
 screenshots/
+session.b64
+session.json
+run-status.txt

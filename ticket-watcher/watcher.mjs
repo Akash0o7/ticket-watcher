@@ -1,5 +1,10 @@
 import { chromium } from "playwright";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { gunzipSync } from "node:zlib";
+
+const STORAGE_STATE_B64 = process.env.STORAGE_STATE_B64 || ""; // saved login session (used on GitHub Actions)
+const RUN_MINUTES = Number(process.env.RUN_MINUTES || 0); // stop after this long so the next run can take over
+const writeStatus = (s) => writeFileSync("run-status.txt", s);
 
 const HOME_URL = "https://ticketgenie.in/";
 const EVENT_URL =
@@ -330,12 +335,22 @@ async function book(page, url) {
   throw new Error("Never reached the payment page");
 }
 
-const context = await chromium.launchPersistentContext("./profile", {
-  headless: HEADLESS,
-  locale: "en-IN",
-  viewport: { width: 1280, height: 900 },
-  args: ["--no-sandbox", "--disable-blink-features=AutomationControlled"],
-});
+const launchArgs = ["--no-sandbox", "--disable-blink-features=AutomationControlled"];
+let browser = null;
+let context;
+if (STORAGE_STATE_B64) {
+  const storageState = JSON.parse(gunzipSync(Buffer.from(STORAGE_STATE_B64, "base64")).toString());
+  browser = await chromium.launch({ headless: HEADLESS, args: launchArgs });
+  context = await browser.newContext({ storageState, locale: "en-IN", viewport: { width: 1280, height: 900 } });
+} else {
+  context = await chromium.launchPersistentContext("./profile", {
+    headless: HEADLESS,
+    locale: "en-IN",
+    viewport: { width: 1280, height: 900 },
+    args: launchArgs,
+  });
+}
+const endAt = RUN_MINUTES ? Date.now() + RUN_MINUTES * 60 * 1000 : Infinity;
 const page = context.pages()[0] ?? (await context.newPage());
 
 log(`Watching every ${INTERVAL_MS / 1000}s | qty ${QTY} | max price Rs ${MAX_PRICE} | dry run: ${DRY_RUN}`);
@@ -345,6 +360,11 @@ let attempts = 0;
 let done = false;
 let lastHeartbeat = Date.now();
 while (!done) {
+  if (Date.now() > endAt) {
+    writeStatus("continue");
+    log("Run time limit reached, handing over to the next run.");
+    break;
+  }
   if (Date.now() - lastHeartbeat > 60 * 60 * 1000) {
     lastHeartbeat = Date.now();
     await notify("Still watching", "Watcher is alive. Tickets not live yet.", HOME_URL, "min");
@@ -360,6 +380,17 @@ while (!done) {
       await notify("TICKETS LIVE", `Auto-booking attempt ${attempts}/${MAX_ATTEMPTS}`, url);
       try {
         done = await book(page, url);
+        if (!done) {
+          // Payment may have gone through without a confirmation page; retrying could double-book.
+          await shot(page, "unconfirmed");
+          await notifyShot(
+            page,
+            "CHECK PAYTM NOW",
+            "Payment was submitted but no confirmation was seen. Check your Paytm wallet and email before booking again.",
+            "urgent"
+          );
+          done = true;
+        }
       } catch (e) {
         log(`Booking attempt failed: ${e.message}`);
         await shot(page, "failed");
@@ -376,4 +407,6 @@ while (!done) {
   }
   if (!done) await sleep(INTERVAL_MS);
 }
+if (done) writeStatus("done");
 await context.close();
+if (browser) await browser.close();

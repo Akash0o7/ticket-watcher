@@ -7,7 +7,8 @@
     "test-run": "DRY_RUN=1 node --env-file-if-exists=.env watcher.mjs",
     "start": "node --env-file-if-exists=.env watcher.mjs",
     "start-env": "node --env-file=.env watcher.mjs",
-    "codespace": "bash codespaces-run.sh"
+    "codespace": "bash codespaces-run.sh",
+    "upload-session": "gh secret set STORAGE_STATE_B64 --repo Akash0o7/ticket-watcher < session.b64"
   },
   "dependencies": {
     "playwright": "^1.50.0"

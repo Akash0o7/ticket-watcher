@@ -1,0 +1,64 @@
+name: ticket-watcher
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/10 * * * *"
+
+# Only one watcher at a time; a queued run waits for the current one to finish.
+concurrency:
+  group: ticket-watcher
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    defaults:
+      run:
+        working-directory: ticket-watcher
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install browser
+        run: |
+          npm install --no-audit --no-fund
+          npx playwright install --with-deps chromium
+          sudo apt-get install -y xvfb
+
+      - name: Watch for tickets
+        id: watch
+        env:
+          STORAGE_STATE_B64: ${{ secrets.STORAGE_STATE_B64 }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          BUYER_NAME: ${{ secrets.BUYER_NAME }}
+          BUYER_EMAIL: ${{ secrets.BUYER_EMAIL }}
+          BUYER_PHONE: ${{ secrets.BUYER_PHONE }}
+          EVENT_URL: https://ticketgenie.in/ticket/india-vs-west-indies-5th-t20i-match-bengaluru-Oct17-2026/
+          QTY: "4"
+          MAX_PRICE: "1500"
+          INTERVAL_SECONDS: "60"
+          HEADLESS: "0"
+          RUN_MINUTES: "340"
+        run: xvfb-run -a --server-args="-screen 0 1280x900x24" node watcher.mjs
+
+      - name: Stop after booking, otherwise hand over to the next run
+        if: always()
+        run: |
+          STATUS=$(cat run-status.txt 2>/dev/null || echo "crashed")
+          echo "Run status: $STATUS"
+          if [ "$STATUS" = "done" ]; then
+            gh workflow disable ticket-watcher.yml --repo "$GITHUB_REPOSITORY"
+          else
+            gh workflow run ticket-watcher.yml --repo "$GITHUB_REPOSITORY"
+          fi
