@@ -1,0 +1,4 @@
+.env
+profile/
+node_modules/
+screenshots/

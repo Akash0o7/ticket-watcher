@@ -1,0 +1,22 @@
+{
+  "name": "ticket-watcher",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:22",
+  "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
+  "postCreateCommand": "bash ticket-watcher/codespaces-setup.sh",
+  "forwardPorts": [6080],
+  "portsAttributes": {
+    "6080": {
+      "label": "Live browser (captcha / Paytm login)",
+      "visibility": "private",
+      "onAutoForward": "silent"
+    }
+  },
+  "hostRequirements": {
+    "cpus": 2
+  },
+  "secrets": {
+    "BUYER_NAME": { "description": "Name typed into the ticketgenie checkout form" },
+    "BUYER_EMAIL": { "description": "Email typed into the ticketgenie checkout form" },
+    "BUYER_PHONE": { "description": "10-digit mobile number typed into the checkout form" }
+  }
+}

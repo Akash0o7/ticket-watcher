@@ -1,0 +1,15 @@
+{
+  "name": "ticket-watcher",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "login": "node login.mjs",
+    "test-run": "DRY_RUN=1 node --env-file-if-exists=.env watcher.mjs",
+    "start": "node --env-file-if-exists=.env watcher.mjs",
+    "start-env": "node --env-file=.env watcher.mjs",
+    "codespace": "bash codespaces-run.sh"
+  },
+  "dependencies": {
+    "playwright": "^1.50.0"
+  }
+}
